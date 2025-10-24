@@ -1,5 +1,0 @@
-# Create runtime.txt to force Python 3.11
-runtime_content = "python-3.11"
-
-with open('runtime.txt', 'w') as f:
-    f.write(runtime_content)
