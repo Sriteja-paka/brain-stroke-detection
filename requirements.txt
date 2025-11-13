@@ -1,0 +1,12 @@
+streamlit
+tensorflow-cpu
+opencv-python-headless
+numpy
+scikit-learn
+matplotlib
+seaborn
+Pillow
+joblib
+lightgbm
+kagglehub
+tqdm
