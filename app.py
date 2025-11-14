@@ -337,32 +337,38 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. Generate SHAP explanations - FIXED ARRAY ERROR
-            shap_explanation = None
+            # 5. Generate SHAP explanations - SIMPLIFIED APPROACH
+            shap_data = None
             if SHAP_AVAILABLE:
                 try:
                     status_text.text("📊 Generating SHAP explanations...")
                     
-                    # Create prediction function for SHAP - FIXED: Proper handling
-                    def predict_fn(x):
-                        # Handle single sample case
-                        if len(x.shape) == 1:
-                            x = x.reshape(1, -1)
-                        x_scaled = self.scaler.transform(x)
-                        x_selected = x_scaled[:, self.best_mask]
-                        return self.ultimate_model_gwo.predict(x_selected, verbose=0)
+                    # SIMPLE SHAP calculation without complex explainers
+                    # Calculate feature importance using permutation importance
+                    baseline_pred = prediction[0][1]  # Stroke probability
                     
-                    # Use KernelExplainer instead of Explainer to avoid array issues
-                    background = shap.sample(features, 10)  # Smaller background for speed
-                    explainer = shap.KernelExplainer(predict_fn, background)
+                    # Calculate importance for each selected feature
+                    feature_importance = []
+                    num_features = selected_features.shape[1]
                     
-                    # Calculate SHAP values
-                    shap_values = explainer.shap_values(features[0:1])  # Single sample
+                    for i in range(min(20, num_features)):  # Check top 20 features
+                        # Permute the feature
+                        temp_features = selected_features.copy()
+                        np.random.shuffle(temp_features[:, i:i+1])
+                        
+                        # Get new prediction
+                        permuted_pred = self.ultimate_model_gwo.predict(temp_features, verbose=0)[0][1]
+                        
+                        # Calculate importance as change in prediction
+                        importance = abs(baseline_pred - permuted_pred)
+                        feature_importance.append((i, importance))
                     
-                    shap_explanation = {
-                        'shap_values': shap_values,
-                        'base_value': explainer.expected_value,
-                        'features': features[0],
+                    # Sort by importance
+                    feature_importance.sort(key=lambda x: x[1], reverse=True)
+                    
+                    shap_data = {
+                        'feature_importance': feature_importance,
+                        'baseline_pred': baseline_pred,
                         'available': True
                     }
                     
@@ -370,7 +376,7 @@ class BrainStrokeDetector:
                     
                 except Exception as e:
                     st.warning(f"⚠️ SHAP explanation skipped: {str(e)}")
-                    shap_explanation = None
+                    shap_data = None
             
             progress_bar.progress(100)
             
@@ -406,7 +412,8 @@ class BrainStrokeDetector:
                 'risk_level': risk_level,
                 'emoji': emoji,
                 'risk_class': risk_class,
-                'shap_explanation': shap_explanation
+                'shap_data': shap_data,
+                'selected_features': selected_features
             }
             
             return result
@@ -416,68 +423,73 @@ class BrainStrokeDetector:
             return None
 
 def display_shap_analysis(result):
-    """Display SHAP analysis - STANDALONE FUNCTION"""
-    if result.get('shap_explanation') is None:
-        st.info("🔍 SHAP explanations are not available for this prediction")
+    """Display SHAP analysis - SIMPLIFIED"""
+    if result.get('shap_data') is None:
+        st.info("🔍 Feature importance analysis is not available for this prediction")
         return
         
     try:
-        shap_exp = result['shap_explanation']
+        shap_data = result['shap_data']
         
-        # Check if SHAP explanation is available
-        if not shap_exp.get('available', False):
-            st.info("🔍 SHAP explanations are not available for this prediction")
+        # Check if SHAP data is available
+        if not shap_data.get('available', False):
+            st.info("🔍 Feature importance analysis is not available for this prediction")
             return
             
         st.markdown("---")
-        st.subheader("🔍 SHAP Feature Analysis")
+        st.subheader("🔍 Feature Importance Analysis")
         
-        shap_values = shap_exp['shap_values']
-        base_value = shap_exp['base_value']
-        features = shap_exp['features']
+        feature_importance = shap_data['feature_importance']
+        baseline_pred = shap_data['baseline_pred']
         
-        # For binary classification, handle the shape properly
-        if isinstance(shap_values, list):
-            # Binary classification case
-            shap_values = shap_values[1]  # Take the positive class (stroke)
+        # Display top features
+        st.write("**Top Contributing Features (GWO Selected):**")
         
-        # Create summary plot
-        st.write("**Feature Importance:**")
-        
-        # Create a simple bar plot for feature importance
-        if len(shap_values.shape) > 1:
-            feature_importance = np.abs(shap_values).mean(0)
-        else:
-            feature_importance = np.abs(shap_values)
+        # Create bar chart
+        if feature_importance:
+            top_features = feature_importance[:10]  # Top 10 features
             
-        # Plot top features
-        top_indices = np.argsort(feature_importance)[-10:][::-1]  # Top 10 features
+            # Prepare data for plotting
+            feature_indices = [f"Feature {idx}" for idx, _ in top_features]
+            importance_scores = [score for _, score in top_features]
+            
+            # Create horizontal bar chart
+            fig, ax = plt.subplots(figsize=(10, 6))
+            y_pos = np.arange(len(feature_indices))
+            
+            bars = ax.barh(y_pos, importance_scores)
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(feature_indices)
+            ax.set_xlabel('Feature Importance Score')
+            ax.set_title('Top 10 Most Important Features')
+            
+            # Add value labels on bars
+            for i, (bar, score) in enumerate(zip(bars, importance_scores)):
+                width = bar.get_width()
+                ax.text(width + 0.001, bar.get_y() + bar.get_height()/2, 
+                       f'{score:.4f}', ha='left', va='center')
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+            
+            # Display feature details
+            st.write("**Feature Impact Details:**")
+            for i, (feature_idx, importance) in enumerate(top_features[:5]):  # Top 5
+                st.write(f"{i+1}. **Feature {feature_idx}**: Impact = {importance:.4f}")
+                
+                # Show if feature increases or decreases stroke probability
+                if importance > 0.01:  # Significant impact
+                    st.write(f"   - This feature significantly influences the prediction")
         
-        fig, ax = plt.subplots(figsize=(10, 6))
-        y_pos = np.arange(len(top_indices))
-        
-        ax.barh(y_pos, feature_importance[top_indices])
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels([f'Feature {i}' for i in top_indices])
-        ax.set_xlabel('SHAP Value Impact')
-        ax.set_title('Top Feature Importances')
-        
-        st.pyplot(fig)
-        plt.close()
-        
-        # Show prediction explanation
-        st.write("**Prediction Explanation:**")
-        st.write(f"Base value: {base_value:.4f}")
-        st.write(f"Final prediction: {result['stroke_probability']:.4f}")
-        
-        # Show top contributing features
-        st.write("**Top Contributing Features:**")
-        for i, idx in enumerate(top_indices[:5]):  # Top 5 features
-            impact = shap_values[idx] if len(shap_values.shape) == 1 else shap_values[0, idx]
-            st.write(f"{i+1}. Feature {idx}: {impact:.4f}")
+        # Show prediction info
+        st.write("**Prediction Information:**")
+        st.write(f"- Baseline stroke probability: {baseline_pred:.4f}")
+        st.write(f"- Number of GWO selected features: {result['selected_features'].shape[1]}")
+        st.write(f"- Top features shown: {min(10, len(feature_importance))}")
             
     except Exception as e:
-        st.error(f"❌ Error displaying SHAP analysis: {str(e)}")
+        st.error(f"❌ Error displaying feature analysis: {str(e)}")
 
 @st.cache_resource
 def load_detector():
@@ -500,20 +512,20 @@ def show_home_page():
         - **Multi-Model Feature Extraction**: EfficientNetV2S, EfficientNetV2M, DenseNet201
         - **Grey Wolf Optimizer**: Advanced feature selection
         - **Real Model Predictions**: Using your trained ensemble model
-        - **SHAP Explanations**: Understand model decisions
+        - **Feature Importance Analysis**: Understand which features drive the prediction
         - **Medical Grade Processing**: Professional image enhancement
         
         ### 🚀 How to Use:
         1. Navigate to the **📊 Analysis** tab  
         2. Upload a brain CT scan image (JPG, PNG, etc.)
-        3. View AI analysis results with SHAP explanations
+        3. View AI analysis results with feature importance
         4. Get risk assessment and probabilities
         
         ### 📊 Output Includes:
         - Original vs. Enhanced image comparison
         - Stroke probability scores
         - Risk level classification
-        - SHAP feature importance analysis
+        - Feature importance analysis (GWO optimized)
         - Confidence metrics
         """)
     
@@ -641,7 +653,7 @@ def show_analysis_page():
                         }
                         st.bar_chart(chart_data, x='Category', y='Probability', color='#ff4b4b')
                     
-                    # SHAP Analysis - FIXED: Using standalone function
+                    # Feature Importance Analysis
                     display_shap_analysis(result)
                     
                     # Final recommendation
