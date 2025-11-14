@@ -6,6 +6,7 @@ import os
 import time
 import tempfile
 import matplotlib.pyplot as plt
+import pandas as pd
 
 # Try to import dependencies
 try:
@@ -331,7 +332,7 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. SIMPLE Feature Importance (No SHAP errors)
+            # 5. SIMPLE Feature Importance (No SHAP, No Grad-CAM)
             feature_importance = []
             try:
                 status_text.text("📊 Analyzing feature importance...")
@@ -339,8 +340,8 @@ class BrainStrokeDetector:
                 # Get baseline prediction
                 baseline_pred = prediction[0][1]  # Stroke probability
                 
-                # Simple permutation importance for top 15 features
-                num_features = min(15, selected_features.shape[1])
+                # Simple permutation importance for top 10 features
+                num_features = min(10, selected_features.shape[1])
                 
                 for i in range(num_features):
                     # Create perturbed features
@@ -423,7 +424,7 @@ def display_feature_analysis(result):
         
         # Create bar chart
         if feature_importance:
-            top_features = feature_importance[:10]  # Top 10 features
+            top_features = feature_importance[:8]  # Top 8 features
             
             # Prepare data for plotting
             feature_indices = [f"Feature {idx}" for idx, _ in top_features]
@@ -431,18 +432,18 @@ def display_feature_analysis(result):
             
             # Create horizontal bar chart
             fig, ax = plt.subplots(figsize=(10, 6))
-            colors = plt.cm.viridis(np.linspace(0, 1, len(top_features)))
+            colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(top_features)))
             
             bars = ax.barh(range(len(feature_indices)), importance_scores, color=colors)
             ax.set_yticks(range(len(feature_indices)))
             ax.set_yticklabels(feature_indices)
             ax.set_xlabel('Feature Importance Score')
-            ax.set_title('Top 10 Most Important Features')
+            ax.set_title('Top Feature Importances')
             
             # Add value labels on bars
             for i, (bar, score) in enumerate(zip(bars, importance_scores)):
                 width = bar.get_width()
-                ax.text(width + 0.001, bar.get_y() + bar.get_height()/2, 
+                ax.text(width + 0.0001, bar.get_y() + bar.get_height()/2, 
                        f'{score:.4f}', ha='left', va='center', fontsize=9)
             
             plt.tight_layout()
@@ -450,8 +451,8 @@ def display_feature_analysis(result):
             plt.close()
             
             # Display feature details
-            st.write("**Feature Impact Details:**")
-            for i, (feature_idx, importance) in enumerate(top_features[:5]):  # Top 5
+            st.write("**Top 5 Most Important Features:**")
+            for i, (feature_idx, importance) in enumerate(top_features[:5]):
                 st.write(f"{i+1}. **Feature {feature_idx}**: Impact = {importance:.4f}")
         
         # Show prediction info
@@ -615,19 +616,29 @@ def show_analysis_page():
                     
                     with col6:
                         st.subheader("📈 Probability Chart")
-                        # Create a DataFrame with custom colors
-                        import pandas as pd
+                        # Create custom chart with better colors
                         chart_data = pd.DataFrame({
                             'Category': ['Normal', 'Stroke'],
-                            'Probability': [
-                                result['normal_probability'], 
-                                result['stroke_probability']
-                            ],
-                            'Color': ['#1f77b4', '#ff4b4b']  # Blue for Normal, Red for Stroke
+                            'Probability': [result['normal_probability'], result['stroke_probability']]
                         })
                         
-                        # Create the chart with custom colors
-                        chart = st.bar_chart(chart_data.set_index('Category')['Probability'])
+                        # Use matplotlib for custom colors
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        colors = ['#1f77b4', '#ff6b6b']  # Blue for Normal, Red for Stroke
+                        bars = ax.bar(chart_data['Category'], chart_data['Probability'], color=colors)
+                        ax.set_ylabel('Probability')
+                        ax.set_title('Stroke vs Normal Probability')
+                        ax.set_ylim(0, 1)
+                        
+                        # Add value labels on bars
+                        for bar in bars:
+                            height = bar.get_height()
+                            ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                                   f'{height:.3f}', ha='center', va='bottom')
+                        
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                        plt.close()
                     
                     # Feature Importance Analysis
                     display_feature_analysis(result)
