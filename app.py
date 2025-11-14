@@ -113,10 +113,9 @@ class BrainStrokeDetector:
         self.best_mask = None
         self.ultimate_models = None
         self.IMG_SIZE = (384, 384)
-        self.shap_explainer = None
         
     def build_feature_extractors(self):
-        """Build feature extractors"""
+        """Build feature extractors - EXACT SAME as Colab code"""
         try:
             with st.spinner("🔄 Building feature extractors..."):
                 IMG_SIZE = self.IMG_SIZE
@@ -153,6 +152,7 @@ class BrainStrokeDetector:
                     'effnet_m': effnet_m_model,
                     'densenet': densenet_model
                 }
+                
                 return True
                 
         except Exception as e:
@@ -160,7 +160,7 @@ class BrainStrokeDetector:
             return False
 
     def universal_image_preprocessor(self, img):
-        """Image preprocessing"""
+        """Image preprocessing - EXACT SAME as Colab code"""
         try:
             target_size = self.IMG_SIZE
             
@@ -236,7 +236,7 @@ class BrainStrokeDetector:
             return None
 
     def extract_features(self, processed_img):
-        """Feature extraction"""
+        """Feature extraction - EXACT SAME as Colab"""
         try:
             input_batch = np.expand_dims(processed_img, axis=0)
             
@@ -245,7 +245,7 @@ class BrainStrokeDetector:
                 features = feature_model.predict(input_batch, verbose=0)
                 features_dict[model_name] = features
             
-            # Combine features
+            # Combine features EXACTLY like in training
             combined_features = np.concatenate([
                 features_dict['effnet_s'],
                 features_dict['effnet_m'], 
@@ -303,8 +303,8 @@ class BrainStrokeDetector:
             st.error(f"❌ Error loading models: {str(e)}")
             return False
 
-    def predict_with_shap(self, processed_img):
-        """Make prediction with SHAP explanations"""
+    def predict_image(self, processed_img):
+        """CLEAN PREDICTION with SHAP"""
         try:
             if not self.models_loaded:
                 st.error("❌ Models not loaded")
@@ -338,20 +338,20 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. Generate SHAP explanations
+            # 5. Generate SHAP explanations using GWO selected features
             shap_values = None
             if SHAP_AVAILABLE:
                 try:
                     status_text.text("📊 Generating SHAP explanations...")
                     
-                    # Create a simple wrapper for prediction
+                    # Create prediction function for SHAP using GWO features
                     def predict_fn(x):
-                        # Scale and select features
+                        # x is the raw features, we need to scale and apply GWO mask
                         x_scaled = self.scaler.transform(x)
                         x_selected = x_scaled[:, self.best_mask]
                         return self.ultimate_model_gwo.predict(x_selected, verbose=0)
                     
-                    # Create explainer
+                    # Use the actual extracted features as background
                     explainer = shap.Explainer(predict_fn, features)
                     shap_values = explainer(features)
                     
@@ -360,8 +360,6 @@ class BrainStrokeDetector:
                 except Exception as shap_error:
                     st.warning(f"⚠️ SHAP explanation skipped: {str(shap_error)}")
                     shap_values = None
-            else:
-                st.warning("⚠️ SHAP not available for explanations")
             
             progress_bar.progress(100)
             
@@ -398,7 +396,9 @@ class BrainStrokeDetector:
                 'emoji': emoji,
                 'risk_class': risk_class,
                 'shap_values': shap_values,
-                'features': features
+                'features': features,
+                'selected_features': selected_features,
+                'gwo_mask': self.best_mask
             }
             
             return result
@@ -408,30 +408,38 @@ class BrainStrokeDetector:
             return None
 
     def display_shap_analysis(self, result):
-        """Display SHAP analysis if available"""
+        """Display SHAP analysis using GWO selected features"""
         if result.get('shap_values') is None:
             st.info("🔍 SHAP explanations are not available for this prediction")
             return
             
         try:
             st.markdown("---")
-            st.subheader("🔍 SHAP Feature Analysis")
+            st.subheader("🔍 SHAP Feature Analysis (GWO Optimized)")
             
             shap_values = result['shap_values']
             features = result['features']
+            gwo_mask = result['gwo_mask']
             
-            # Create summary plot
+            # Get the names of the top GWO features
+            num_features = len(gwo_mask)
+            selected_indices = np.where(gwo_mask)[0]
+            
+            st.write(f"**GWO Selected Features:** {len(selected_indices)} out of {num_features} total features")
+            
+            # Create summary plot for the actual prediction
             st.write("**Feature Importance Summary:**")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            shap.summary_plot(shap_values.values, features, show=False)
+            fig, ax = plt.subplots(figsize=(12, 8))
+            shap.summary_plot(shap_values.values, features, show=False, plot_size=None)
+            plt.tight_layout()
             st.pyplot(fig)
             plt.close()
             
-            # Display force plot
+            # Show force plot for the current prediction
             st.write("**Prediction Explanation:**")
-            st.write("This shows how each feature contributes to pushing the model output from the base value to the final prediction.")
+            st.write("This shows how each feature contributes to the final prediction:")
             
-            force_fig = plt.figure()
+            force_fig, ax = plt.subplots(figsize=(12, 3))
             shap.force_plot(
                 shap_values.base_values[0], 
                 shap_values.values[0], 
@@ -439,6 +447,7 @@ class BrainStrokeDetector:
                 matplotlib=True,
                 show=False
             )
+            plt.tight_layout()
             st.pyplot(force_fig)
             plt.close()
             
@@ -466,7 +475,7 @@ def show_home_page():
         - **Multi-Model Feature Extraction**: EfficientNetV2S, EfficientNetV2M, DenseNet201
         - **Grey Wolf Optimizer**: Advanced feature selection
         - **Real Model Predictions**: Using your trained ensemble model
-        - **SHAP Explanations**: Understand model decisions
+        - **SHAP Explanations**: Understand model decisions using GWO-optimized features
         - **Medical Grade Processing**: Professional image enhancement
         
         ### 🚀 How to Use:
@@ -479,7 +488,7 @@ def show_home_page():
         - Original vs. Enhanced image comparison
         - Stroke probability scores
         - Risk level classification
-        - SHAP feature importance analysis
+        - SHAP feature importance analysis (GWO optimized)
         - Confidence metrics
         """)
     
@@ -559,8 +568,8 @@ def show_analysis_page():
                     st.image(processed_img, use_column_width=True)
                     st.caption("AI-enhanced version for better feature detection")
                 
-                # Make prediction with SHAP
-                result = detector.predict_with_shap(processed_img)
+                # Make prediction (this now includes SHAP)
+                result = detector.predict_image(processed_img)
                 
                 if result is not None:
                     # Display results
