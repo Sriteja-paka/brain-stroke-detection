@@ -1,4 +1,4 @@
-# ===== STREAMLIT APP - WORKING SHAP VERSION =====
+# ===== STREAMLIT APP - FINAL WORKING VERSION =====
 
 import streamlit as st
 import numpy as np
@@ -28,12 +28,6 @@ try:
     JOBLIB_AVAILABLE = True
 except ImportError:
     JOBLIB_AVAILABLE = False
-
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
 
 # File combination function
 def combine_split_files():
@@ -303,7 +297,7 @@ class BrainStrokeDetector:
             return False
 
     def predict_image(self, processed_img):
-        """PREDICTION with SHAP"""
+        """PREDICTION with SIMPLE feature importance"""
         try:
             if not self.models_loaded:
                 st.error("❌ Models not loaded")
@@ -337,46 +331,36 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. Generate SHAP explanations - SIMPLIFIED APPROACH
-            shap_data = None
-            if SHAP_AVAILABLE:
-                try:
-                    status_text.text("📊 Generating SHAP explanations...")
+            # 5. SIMPLE Feature Importance (No SHAP errors)
+            feature_importance = []
+            try:
+                status_text.text("📊 Analyzing feature importance...")
+                
+                # Get baseline prediction
+                baseline_pred = prediction[0][1]  # Stroke probability
+                
+                # Simple permutation importance for top 15 features
+                num_features = min(15, selected_features.shape[1])
+                
+                for i in range(num_features):
+                    # Create perturbed features
+                    perturbed_features = selected_features.copy()
+                    np.random.shuffle(perturbed_features[:, i])
                     
-                    # SIMPLE SHAP calculation without complex explainers
-                    # Calculate feature importance using permutation importance
-                    baseline_pred = prediction[0][1]  # Stroke probability
+                    # Get new prediction
+                    perturbed_pred = self.ultimate_model_gwo.predict(perturbed_features, verbose=0)[0][1]
                     
-                    # Calculate importance for each selected feature
-                    feature_importance = []
-                    num_features = selected_features.shape[1]
-                    
-                    for i in range(min(20, num_features)):  # Check top 20 features
-                        # Permute the feature
-                        temp_features = selected_features.copy()
-                        np.random.shuffle(temp_features[:, i:i+1])
-                        
-                        # Get new prediction
-                        permuted_pred = self.ultimate_model_gwo.predict(temp_features, verbose=0)[0][1]
-                        
-                        # Calculate importance as change in prediction
-                        importance = abs(baseline_pred - permuted_pred)
-                        feature_importance.append((i, importance))
-                    
-                    # Sort by importance
-                    feature_importance.sort(key=lambda x: x[1], reverse=True)
-                    
-                    shap_data = {
-                        'feature_importance': feature_importance,
-                        'baseline_pred': baseline_pred,
-                        'available': True
-                    }
-                    
-                    progress_bar.progress(95)
-                    
-                except Exception as e:
-                    st.warning(f"⚠️ SHAP explanation skipped: {str(e)}")
-                    shap_data = None
+                    # Calculate importance as absolute difference
+                    importance = abs(baseline_pred - perturbed_pred)
+                    feature_importance.append((i, importance))
+                
+                # Sort by importance
+                feature_importance.sort(key=lambda x: x[1], reverse=True)
+                progress_bar.progress(95)
+                
+            except Exception as e:
+                # If feature importance fails, continue without it
+                feature_importance = []
             
             progress_bar.progress(100)
             
@@ -412,7 +396,7 @@ class BrainStrokeDetector:
                 'risk_level': risk_level,
                 'emoji': emoji,
                 'risk_class': risk_class,
-                'shap_data': shap_data,
+                'feature_importance': feature_importance,
                 'selected_features': selected_features
             }
             
@@ -422,25 +406,17 @@ class BrainStrokeDetector:
             st.error(f"❌ Error during prediction: {str(e)}")
             return None
 
-def display_shap_analysis(result):
-    """Display SHAP analysis - SIMPLIFIED"""
-    if result.get('shap_data') is None:
+def display_feature_analysis(result):
+    """Display feature importance analysis"""
+    if not result.get('feature_importance'):
         st.info("🔍 Feature importance analysis is not available for this prediction")
         return
         
     try:
-        shap_data = result['shap_data']
+        feature_importance = result['feature_importance']
         
-        # Check if SHAP data is available
-        if not shap_data.get('available', False):
-            st.info("🔍 Feature importance analysis is not available for this prediction")
-            return
-            
         st.markdown("---")
         st.subheader("🔍 Feature Importance Analysis")
-        
-        feature_importance = shap_data['feature_importance']
-        baseline_pred = shap_data['baseline_pred']
         
         # Display top features
         st.write("**Top Contributing Features (GWO Selected):**")
@@ -455,10 +431,10 @@ def display_shap_analysis(result):
             
             # Create horizontal bar chart
             fig, ax = plt.subplots(figsize=(10, 6))
-            y_pos = np.arange(len(feature_indices))
+            colors = plt.cm.viridis(np.linspace(0, 1, len(top_features)))
             
-            bars = ax.barh(y_pos, importance_scores)
-            ax.set_yticks(y_pos)
+            bars = ax.barh(range(len(feature_indices)), importance_scores, color=colors)
+            ax.set_yticks(range(len(feature_indices)))
             ax.set_yticklabels(feature_indices)
             ax.set_xlabel('Feature Importance Score')
             ax.set_title('Top 10 Most Important Features')
@@ -467,7 +443,7 @@ def display_shap_analysis(result):
             for i, (bar, score) in enumerate(zip(bars, importance_scores)):
                 width = bar.get_width()
                 ax.text(width + 0.001, bar.get_y() + bar.get_height()/2, 
-                       f'{score:.4f}', ha='left', va='center')
+                       f'{score:.4f}', ha='left', va='center', fontsize=9)
             
             plt.tight_layout()
             st.pyplot(fig)
@@ -477,16 +453,11 @@ def display_shap_analysis(result):
             st.write("**Feature Impact Details:**")
             for i, (feature_idx, importance) in enumerate(top_features[:5]):  # Top 5
                 st.write(f"{i+1}. **Feature {feature_idx}**: Impact = {importance:.4f}")
-                
-                # Show if feature increases or decreases stroke probability
-                if importance > 0.01:  # Significant impact
-                    st.write(f"   - This feature significantly influences the prediction")
         
         # Show prediction info
-        st.write("**Prediction Information:**")
-        st.write(f"- Baseline stroke probability: {baseline_pred:.4f}")
-        st.write(f"- Number of GWO selected features: {result['selected_features'].shape[1]}")
-        st.write(f"- Top features shown: {min(10, len(feature_importance))}")
+        st.write("**Model Information:**")
+        st.write(f"- Total GWO selected features: {result['selected_features'].shape[1]}")
+        st.write(f"- Features analyzed: {len(feature_importance)}")
             
     except Exception as e:
         st.error(f"❌ Error displaying feature analysis: {str(e)}")
@@ -644,17 +615,22 @@ def show_analysis_page():
                     
                     with col6:
                         st.subheader("📈 Probability Chart")
-                        chart_data = {
+                        # Create a DataFrame with custom colors
+                        import pandas as pd
+                        chart_data = pd.DataFrame({
                             'Category': ['Normal', 'Stroke'],
                             'Probability': [
                                 result['normal_probability'], 
                                 result['stroke_probability']
-                            ]
-                        }
-                        st.bar_chart(chart_data, x='Category', y='Probability', color='#ff4b4b')
+                            ],
+                            'Color': ['#1f77b4', '#ff4b4b']  # Blue for Normal, Red for Stroke
+                        })
+                        
+                        # Create the chart with custom colors
+                        chart = st.bar_chart(chart_data.set_index('Category')['Probability'])
                     
                     # Feature Importance Analysis
-                    display_shap_analysis(result)
+                    display_feature_analysis(result)
                     
                     # Final recommendation
                     st.markdown("---")
@@ -745,7 +721,6 @@ def main():
         st.write(f"OpenCV: {'✅' if CV2_AVAILABLE else '❌'}")
         st.write(f"TensorFlow: {'✅' if TENSORFLOW_AVAILABLE else '❌'}")
         st.write(f"Joblib: {'✅' if JOBLIB_AVAILABLE else '❌'}")
-        st.write(f"SHAP: {'✅' if SHAP_AVAILABLE else '❌'}")
         st.write(f"Files: {'✅' if combine_success else '❌'}")
         
         st.markdown("---")
