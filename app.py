@@ -337,35 +337,39 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. Generate SHAP explanations
-            shap_values = None
+            # 5. Generate SHAP explanations - FIXED ARRAY ERROR
             shap_explanation = None
             if SHAP_AVAILABLE:
                 try:
                     status_text.text("📊 Generating SHAP explanations...")
                     
-                    # Create prediction function for SHAP
+                    # Create prediction function for SHAP - FIXED: Proper handling
                     def predict_fn(x):
+                        # Handle single sample case
+                        if len(x.shape) == 1:
+                            x = x.reshape(1, -1)
                         x_scaled = self.scaler.transform(x)
                         x_selected = x_scaled[:, self.best_mask]
                         return self.ultimate_model_gwo.predict(x_selected, verbose=0)
                     
-                    # Create explainer
-                    explainer = shap.Explainer(predict_fn, features)
-                    shap_values = explainer(features)
+                    # Use KernelExplainer instead of Explainer to avoid array issues
+                    background = shap.sample(features, 10)  # Smaller background for speed
+                    explainer = shap.KernelExplainer(predict_fn, background)
                     
-                    # Create SHAP explanation
+                    # Calculate SHAP values
+                    shap_values = explainer.shap_values(features[0:1])  # Single sample
+                    
                     shap_explanation = {
-                        'values': shap_values.values,
-                        'base_values': shap_values.base_values,
-                        'data': shap_values.data
+                        'shap_values': shap_values,
+                        'base_value': explainer.expected_value,
+                        'features': features[0],
+                        'available': True
                     }
                     
                     progress_bar.progress(95)
                     
                 except Exception as e:
                     st.warning(f"⚠️ SHAP explanation skipped: {str(e)}")
-                    shap_values = None
                     shap_explanation = None
             
             progress_bar.progress(100)
@@ -402,9 +406,7 @@ class BrainStrokeDetector:
                 'risk_level': risk_level,
                 'emoji': emoji,
                 'risk_class': risk_class,
-                'shap_values': shap_values,
-                'shap_explanation': shap_explanation,
-                'features': features
+                'shap_explanation': shap_explanation
             }
             
             return result
@@ -413,41 +415,69 @@ class BrainStrokeDetector:
             st.error(f"❌ Error during prediction: {str(e)}")
             return None
 
-    def display_shap_analysis(self, result):
-        """Display SHAP analysis"""
-        if result.get('shap_explanation') is None:
+def display_shap_analysis(result):
+    """Display SHAP analysis - STANDALONE FUNCTION"""
+    if result.get('shap_explanation') is None:
+        st.info("🔍 SHAP explanations are not available for this prediction")
+        return
+        
+    try:
+        shap_exp = result['shap_explanation']
+        
+        # Check if SHAP explanation is available
+        if not shap_exp.get('available', False):
             st.info("🔍 SHAP explanations are not available for this prediction")
             return
             
-        try:
-            st.markdown("---")
-            st.subheader("🔍 SHAP Feature Analysis")
+        st.markdown("---")
+        st.subheader("🔍 SHAP Feature Analysis")
+        
+        shap_values = shap_exp['shap_values']
+        base_value = shap_exp['base_value']
+        features = shap_exp['features']
+        
+        # For binary classification, handle the shape properly
+        if isinstance(shap_values, list):
+            # Binary classification case
+            shap_values = shap_values[1]  # Take the positive class (stroke)
+        
+        # Create summary plot
+        st.write("**Feature Importance:**")
+        
+        # Create a simple bar plot for feature importance
+        if len(shap_values.shape) > 1:
+            feature_importance = np.abs(shap_values).mean(0)
+        else:
+            feature_importance = np.abs(shap_values)
             
-            shap_values = result['shap_values']
-            features = result['features']
+        # Plot top features
+        top_indices = np.argsort(feature_importance)[-10:][::-1]  # Top 10 features
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        y_pos = np.arange(len(top_indices))
+        
+        ax.barh(y_pos, feature_importance[top_indices])
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels([f'Feature {i}' for i in top_indices])
+        ax.set_xlabel('SHAP Value Impact')
+        ax.set_title('Top Feature Importances')
+        
+        st.pyplot(fig)
+        plt.close()
+        
+        # Show prediction explanation
+        st.write("**Prediction Explanation:**")
+        st.write(f"Base value: {base_value:.4f}")
+        st.write(f"Final prediction: {result['stroke_probability']:.4f}")
+        
+        # Show top contributing features
+        st.write("**Top Contributing Features:**")
+        for i, idx in enumerate(top_indices[:5]):  # Top 5 features
+            impact = shap_values[idx] if len(shap_values.shape) == 1 else shap_values[0, idx]
+            st.write(f"{i+1}. Feature {idx}: {impact:.4f}")
             
-            # Create summary plot
-            st.write("**Feature Importance Summary:**")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            shap.summary_plot(shap_values.values, features, show=False)
-            st.pyplot(fig)
-            plt.close()
-            
-            # Show force plot
-            st.write("**Prediction Explanation:**")
-            force_fig, ax = plt.subplots(figsize=(12, 3))
-            shap.force_plot(
-                shap_values.base_values[0], 
-                shap_values.values[0], 
-                features[0],
-                matplotlib=True,
-                show=False
-            )
-            st.pyplot(force_fig)
-            plt.close()
-            
-        except Exception as e:
-            st.error(f"❌ Error displaying SHAP analysis: {str(e)}")
+    except Exception as e:
+        st.error(f"❌ Error displaying SHAP analysis: {str(e)}")
 
 @st.cache_resource
 def load_detector():
@@ -611,8 +641,8 @@ def show_analysis_page():
                         }
                         st.bar_chart(chart_data, x='Category', y='Probability', color='#ff4b4b')
                     
-                    # SHAP Analysis
-                    detector.display_shap_analysis(result)
+                    # SHAP Analysis - FIXED: Using standalone function
+                    display_shap_analysis(result)
                     
                     # Final recommendation
                     st.markdown("---")
