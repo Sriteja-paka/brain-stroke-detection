@@ -1,4 +1,4 @@
-# ===== STREAMLIT APP - FIXED FEATURE IMPORTANCE =====
+# ===== STREAMLIT APP - DEBUGGED FEATURE IMPORTANCE =====
 
 import streamlit as st
 import numpy as np
@@ -332,30 +332,43 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. SIMPLE Feature Importance - FIXED VERSION
+            # 5. SIMPLE Feature Importance - DEBUGGED VERSION
             feature_importance = []
+            debug_info = []
+            
             try:
                 status_text.text("📊 Analyzing feature importance...")
                 
                 # Get baseline prediction
                 baseline_pred = prediction[0][1]  # Stroke probability
+                debug_info.append(f"Baseline stroke probability: {baseline_pred:.4f}")
                 
-                # Simple permutation importance for top features
+                # Check if we have features to analyze
                 num_features = selected_features.shape[1]
+                debug_info.append(f"Number of GWO selected features: {num_features}")
                 
-                # Only analyze if we have features
-                if num_features > 0:
-                    # Analyze top 8 features or all if less than 8
+                if num_features == 0:
+                    debug_info.append("No features to analyze (num_features = 0)")
+                else:
+                    # Analyze top features
                     num_to_analyze = min(8, num_features)
+                    debug_info.append(f"Analyzing top {num_to_analyze} features")
+                    
+                    successful_analyses = 0
                     
                     for i in range(num_to_analyze):
                         try:
                             # Create perturbed features
                             perturbed_features = selected_features.copy()
                             
+                            # Store original values for debugging
+                            original_value = perturbed_features[0, i]
+                            
                             # Shuffle only the specific feature column
-                            original_values = perturbed_features[:, i].copy()
                             np.random.shuffle(perturbed_features[:, i])
+                            shuffled_value = perturbed_features[0, i]
+                            
+                            debug_info.append(f"Feature {i}: original={original_value:.4f}, shuffled={shuffled_value:.4f}")
                             
                             # Get new prediction
                             perturbed_pred = self.ultimate_model_gwo.predict(perturbed_features, verbose=0)
@@ -364,20 +377,27 @@ class BrainStrokeDetector:
                             # Calculate importance as absolute difference
                             importance = abs(baseline_pred - perturbed_stroke_prob)
                             feature_importance.append((i, importance))
+                            successful_analyses += 1
+                            
+                            debug_info.append(f"Feature {i}: importance = {importance:.6f}")
                             
                         except Exception as feature_error:
-                            # Skip this feature if there's an error
+                            debug_info.append(f"Feature {i} failed: {str(feature_error)}")
                             continue
+                    
+                    debug_info.append(f"Successful analyses: {successful_analyses}/{num_to_analyze}")
                     
                     # Sort by importance (only if we have results)
                     if feature_importance:
                         feature_importance.sort(key=lambda x: x[1], reverse=True)
+                        debug_info.append(f"Sorted {len(feature_importance)} features by importance")
+                    else:
+                        debug_info.append("No successful feature importance calculations")
                 
                 progress_bar.progress(95)
                 
             except Exception as e:
-                # If feature importance fails, log it but continue
-                st.warning(f"⚠️ Feature importance analysis skipped: {str(e)}")
+                debug_info.append(f"Feature importance failed completely: {str(e)}")
                 feature_importance = []
             
             progress_bar.progress(100)
@@ -416,7 +436,8 @@ class BrainStrokeDetector:
                 'risk_class': risk_class,
                 'feature_importance': feature_importance,
                 'selected_features': selected_features,
-                'num_features_analyzed': len(feature_importance)
+                'num_features_analyzed': len(feature_importance),
+                'debug_info': debug_info
             }
             
             return result
@@ -429,18 +450,27 @@ def display_feature_analysis(result):
     """Display feature importance analysis"""
     if not result.get('feature_importance'):
         st.info("🔍 Feature importance analysis is not available for this prediction")
-        st.write(f"Debug: feature_importance = {result.get('feature_importance')}")
-        st.write(f"Debug: num_features_analyzed = {result.get('num_features_analyzed', 0)}")
+        
+        # Show detailed debug information
+        with st.expander("🔧 Debug Information"):
+            st.write("**Why feature importance failed:**")
+            debug_info = result.get('debug_info', [])
+            if debug_info:
+                for info in debug_info:
+                    st.write(f"- {info}")
+            else:
+                st.write("No debug information available")
+                
+            st.write("**Feature Details:**")
+            st.write(f"- Selected features shape: {result.get('selected_features', np.array([])).shape}")
+            st.write(f"- Number of features analyzed: {result.get('num_features_analyzed', 0)}")
+            st.write(f"- Feature importance list: {result.get('feature_importance')}")
+        
         return
         
     try:
         feature_importance = result['feature_importance']
         
-        # Check if we actually have feature importance data
-        if not feature_importance:
-            st.info("🔍 No feature importance data available for this prediction")
-            return
-            
         st.markdown("---")
         st.subheader("🔍 Feature Importance Analysis")
         
