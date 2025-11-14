@@ -1,4 +1,4 @@
-# ===== STREAMLIT APP - WITH WORKING SHAP =====
+# ===== STREAMLIT APP - WORKING SHAP VERSION =====
 
 import streamlit as st
 import numpy as np
@@ -34,7 +34,6 @@ try:
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
-    st.warning("SHAP not available. Install with: pip install shap")
 
 # File combination function
 def combine_split_files():
@@ -304,7 +303,7 @@ class BrainStrokeDetector:
             return False
 
     def predict_image(self, processed_img):
-        """CLEAN PREDICTION with SHAP"""
+        """PREDICTION with SHAP"""
         try:
             if not self.models_loaded:
                 st.error("❌ Models not loaded")
@@ -338,28 +337,36 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. Generate SHAP explanations using GWO selected features
+            # 5. Generate SHAP explanations
             shap_values = None
+            shap_explanation = None
             if SHAP_AVAILABLE:
                 try:
                     status_text.text("📊 Generating SHAP explanations...")
                     
-                    # Create prediction function for SHAP using GWO features
+                    # Create prediction function for SHAP
                     def predict_fn(x):
-                        # x is the raw features, we need to scale and apply GWO mask
                         x_scaled = self.scaler.transform(x)
                         x_selected = x_scaled[:, self.best_mask]
                         return self.ultimate_model_gwo.predict(x_selected, verbose=0)
                     
-                    # Use the actual extracted features as background
+                    # Create explainer
                     explainer = shap.Explainer(predict_fn, features)
                     shap_values = explainer(features)
                     
+                    # Create SHAP explanation
+                    shap_explanation = {
+                        'values': shap_values.values,
+                        'base_values': shap_values.base_values,
+                        'data': shap_values.data
+                    }
+                    
                     progress_bar.progress(95)
                     
-                except Exception as shap_error:
-                    st.warning(f"⚠️ SHAP explanation skipped: {str(shap_error)}")
+                except Exception as e:
+                    st.warning(f"⚠️ SHAP explanation skipped: {str(e)}")
                     shap_values = None
+                    shap_explanation = None
             
             progress_bar.progress(100)
             
@@ -396,9 +403,8 @@ class BrainStrokeDetector:
                 'emoji': emoji,
                 'risk_class': risk_class,
                 'shap_values': shap_values,
-                'features': features,
-                'selected_features': selected_features,
-                'gwo_mask': self.best_mask
+                'shap_explanation': shap_explanation,
+                'features': features
             }
             
             return result
@@ -408,37 +414,27 @@ class BrainStrokeDetector:
             return None
 
     def display_shap_analysis(self, result):
-        """Display SHAP analysis using GWO selected features"""
-        if result.get('shap_values') is None:
+        """Display SHAP analysis"""
+        if result.get('shap_explanation') is None:
             st.info("🔍 SHAP explanations are not available for this prediction")
             return
             
         try:
             st.markdown("---")
-            st.subheader("🔍 SHAP Feature Analysis (GWO Optimized)")
+            st.subheader("🔍 SHAP Feature Analysis")
             
             shap_values = result['shap_values']
             features = result['features']
-            gwo_mask = result['gwo_mask']
             
-            # Get the names of the top GWO features
-            num_features = len(gwo_mask)
-            selected_indices = np.where(gwo_mask)[0]
-            
-            st.write(f"**GWO Selected Features:** {len(selected_indices)} out of {num_features} total features")
-            
-            # Create summary plot for the actual prediction
+            # Create summary plot
             st.write("**Feature Importance Summary:**")
-            fig, ax = plt.subplots(figsize=(12, 8))
-            shap.summary_plot(shap_values.values, features, show=False, plot_size=None)
-            plt.tight_layout()
+            fig, ax = plt.subplots(figsize=(10, 6))
+            shap.summary_plot(shap_values.values, features, show=False)
             st.pyplot(fig)
             plt.close()
             
-            # Show force plot for the current prediction
+            # Show force plot
             st.write("**Prediction Explanation:**")
-            st.write("This shows how each feature contributes to the final prediction:")
-            
             force_fig, ax = plt.subplots(figsize=(12, 3))
             shap.force_plot(
                 shap_values.base_values[0], 
@@ -447,7 +443,6 @@ class BrainStrokeDetector:
                 matplotlib=True,
                 show=False
             )
-            plt.tight_layout()
             st.pyplot(force_fig)
             plt.close()
             
@@ -475,7 +470,7 @@ def show_home_page():
         - **Multi-Model Feature Extraction**: EfficientNetV2S, EfficientNetV2M, DenseNet201
         - **Grey Wolf Optimizer**: Advanced feature selection
         - **Real Model Predictions**: Using your trained ensemble model
-        - **SHAP Explanations**: Understand model decisions using GWO-optimized features
+        - **SHAP Explanations**: Understand model decisions
         - **Medical Grade Processing**: Professional image enhancement
         
         ### 🚀 How to Use:
@@ -488,7 +483,7 @@ def show_home_page():
         - Original vs. Enhanced image comparison
         - Stroke probability scores
         - Risk level classification
-        - SHAP feature importance analysis (GWO optimized)
+        - SHAP feature importance analysis
         - Confidence metrics
         """)
     
@@ -568,7 +563,7 @@ def show_analysis_page():
                     st.image(processed_img, use_column_width=True)
                     st.caption("AI-enhanced version for better feature detection")
                 
-                # Make prediction (this now includes SHAP)
+                # Make prediction
                 result = detector.predict_image(processed_img)
                 
                 if result is not None:
