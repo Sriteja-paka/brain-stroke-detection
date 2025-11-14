@@ -1,4 +1,4 @@
-# ===== STREAMLIT APP - FINAL WORKING VERSION =====
+# ===== STREAMLIT APP - FIXED FEATURE IMPORTANCE =====
 
 import streamlit as st
 import numpy as np
@@ -332,7 +332,7 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. SIMPLE Feature Importance (No SHAP, No Grad-CAM)
+            # 5. SIMPLE Feature Importance - FIXED VERSION
             feature_importance = []
             try:
                 status_text.text("📊 Analyzing feature importance...")
@@ -340,27 +340,44 @@ class BrainStrokeDetector:
                 # Get baseline prediction
                 baseline_pred = prediction[0][1]  # Stroke probability
                 
-                # Simple permutation importance for top 10 features
-                num_features = min(10, selected_features.shape[1])
+                # Simple permutation importance for top features
+                num_features = selected_features.shape[1]
                 
-                for i in range(num_features):
-                    # Create perturbed features
-                    perturbed_features = selected_features.copy()
-                    np.random.shuffle(perturbed_features[:, i])
+                # Only analyze if we have features
+                if num_features > 0:
+                    # Analyze top 8 features or all if less than 8
+                    num_to_analyze = min(8, num_features)
                     
-                    # Get new prediction
-                    perturbed_pred = self.ultimate_model_gwo.predict(perturbed_features, verbose=0)[0][1]
+                    for i in range(num_to_analyze):
+                        try:
+                            # Create perturbed features
+                            perturbed_features = selected_features.copy()
+                            
+                            # Shuffle only the specific feature column
+                            original_values = perturbed_features[:, i].copy()
+                            np.random.shuffle(perturbed_features[:, i])
+                            
+                            # Get new prediction
+                            perturbed_pred = self.ultimate_model_gwo.predict(perturbed_features, verbose=0)
+                            perturbed_stroke_prob = perturbed_pred[0][1]
+                            
+                            # Calculate importance as absolute difference
+                            importance = abs(baseline_pred - perturbed_stroke_prob)
+                            feature_importance.append((i, importance))
+                            
+                        except Exception as feature_error:
+                            # Skip this feature if there's an error
+                            continue
                     
-                    # Calculate importance as absolute difference
-                    importance = abs(baseline_pred - perturbed_pred)
-                    feature_importance.append((i, importance))
+                    # Sort by importance (only if we have results)
+                    if feature_importance:
+                        feature_importance.sort(key=lambda x: x[1], reverse=True)
                 
-                # Sort by importance
-                feature_importance.sort(key=lambda x: x[1], reverse=True)
                 progress_bar.progress(95)
                 
             except Exception as e:
-                # If feature importance fails, continue without it
+                # If feature importance fails, log it but continue
+                st.warning(f"⚠️ Feature importance analysis skipped: {str(e)}")
                 feature_importance = []
             
             progress_bar.progress(100)
@@ -398,7 +415,8 @@ class BrainStrokeDetector:
                 'emoji': emoji,
                 'risk_class': risk_class,
                 'feature_importance': feature_importance,
-                'selected_features': selected_features
+                'selected_features': selected_features,
+                'num_features_analyzed': len(feature_importance)
             }
             
             return result
@@ -411,54 +429,61 @@ def display_feature_analysis(result):
     """Display feature importance analysis"""
     if not result.get('feature_importance'):
         st.info("🔍 Feature importance analysis is not available for this prediction")
+        st.write(f"Debug: feature_importance = {result.get('feature_importance')}")
+        st.write(f"Debug: num_features_analyzed = {result.get('num_features_analyzed', 0)}")
         return
         
     try:
         feature_importance = result['feature_importance']
         
+        # Check if we actually have feature importance data
+        if not feature_importance:
+            st.info("🔍 No feature importance data available for this prediction")
+            return
+            
         st.markdown("---")
         st.subheader("🔍 Feature Importance Analysis")
         
         # Display top features
-        st.write("**Top Contributing Features (GWO Selected):**")
+        st.write(f"**Top Contributing Features (Analyzed {len(feature_importance)} out of {result['selected_features'].shape[1]} GWO features):**")
         
         # Create bar chart
-        if feature_importance:
-            top_features = feature_importance[:8]  # Top 8 features
-            
-            # Prepare data for plotting
-            feature_indices = [f"Feature {idx}" for idx, _ in top_features]
-            importance_scores = [score for _, score in top_features]
-            
-            # Create horizontal bar chart
-            fig, ax = plt.subplots(figsize=(10, 6))
-            colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(top_features)))
-            
-            bars = ax.barh(range(len(feature_indices)), importance_scores, color=colors)
-            ax.set_yticks(range(len(feature_indices)))
-            ax.set_yticklabels(feature_indices)
-            ax.set_xlabel('Feature Importance Score')
-            ax.set_title('Top Feature Importances')
-            
-            # Add value labels on bars
-            for i, (bar, score) in enumerate(zip(bars, importance_scores)):
-                width = bar.get_width()
-                ax.text(width + 0.0001, bar.get_y() + bar.get_height()/2, 
-                       f'{score:.4f}', ha='left', va='center', fontsize=9)
-            
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-            
-            # Display feature details
-            st.write("**Top 5 Most Important Features:**")
-            for i, (feature_idx, importance) in enumerate(top_features[:5]):
-                st.write(f"{i+1}. **Feature {feature_idx}**: Impact = {importance:.4f}")
+        top_features = feature_importance[:8]  # Top 8 features
         
-        # Show prediction info
-        st.write("**Model Information:**")
-        st.write(f"- Total GWO selected features: {result['selected_features'].shape[1]}")
-        st.write(f"- Features analyzed: {len(feature_importance)}")
+        # Prepare data for plotting
+        feature_indices = [f"Feature {idx}" for idx, _ in top_features]
+        importance_scores = [score for _, score in top_features]
+        
+        # Create horizontal bar chart
+        fig, ax = plt.subplots(figsize=(10, 6))
+        colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(top_features)))
+        
+        bars = ax.barh(range(len(feature_indices)), importance_scores, color=colors)
+        ax.set_yticks(range(len(feature_indices)))
+        ax.set_yticklabels(feature_indices)
+        ax.set_xlabel('Feature Importance Score')
+        ax.set_title('Top Feature Importances')
+        
+        # Add value labels on bars
+        for i, (bar, score) in enumerate(zip(bars, importance_scores)):
+            width = bar.get_width()
+            ax.text(width + 0.0001, bar.get_y() + bar.get_height()/2, 
+                   f'{score:.4f}', ha='left', va='center', fontsize=9)
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        
+        # Display feature details
+        st.write("**Top 5 Most Important Features:**")
+        for i, (feature_idx, importance) in enumerate(top_features[:5]):
+            st.write(f"{i+1}. **Feature {feature_idx}**: Impact = {importance:.4f}")
+        
+        # Show additional info
+        st.write("**Interpretation:**")
+        st.write("- Higher scores indicate features that have greater impact on the prediction")
+        st.write("- Features are selected using Grey Wolf Optimizer (GWO)")
+        st.write("- Analysis shows how much each feature influences stroke probability")
             
     except Exception as e:
         st.error(f"❌ Error displaying feature analysis: {str(e)}")
