@@ -1,4 +1,4 @@
-# ===== STREAMLIT APP - DEBUGGED FEATURE IMPORTANCE =====
+# ===== STREAMLIT APP - FIXED FEATURE IMPORTANCE =====
 
 import streamlit as st
 import numpy as np
@@ -332,43 +332,33 @@ class BrainStrokeDetector:
             final_class = int(np.argmax(prediction))
             progress_bar.progress(85)
             
-            # 5. SIMPLE Feature Importance - DEBUGGED VERSION
+            # 5. SIMPLE Feature Importance - FIXED VERSION
             feature_importance = []
-            debug_info = []
             
             try:
                 status_text.text("📊 Analyzing feature importance...")
                 
                 # Get baseline prediction
                 baseline_pred = prediction[0][1]  # Stroke probability
-                debug_info.append(f"Baseline stroke probability: {baseline_pred:.4f}")
                 
                 # Check if we have features to analyze
-                num_features = selected_features.shape[1]
-                debug_info.append(f"Number of GWO selected features: {num_features}")
-                
-                if num_features == 0:
-                    debug_info.append("No features to analyze (num_features = 0)")
+                if hasattr(selected_features, 'shape'):
+                    num_features = selected_features.shape[1]
                 else:
+                    num_features = 0
+                
+                if num_features > 0:
                     # Analyze top features
                     num_to_analyze = min(8, num_features)
-                    debug_info.append(f"Analyzing top {num_to_analyze} features")
-                    
-                    successful_analyses = 0
                     
                     for i in range(num_to_analyze):
                         try:
-                            # Create perturbed features
+                            # Create perturbed features - ensure it's a numpy array
                             perturbed_features = selected_features.copy()
                             
-                            # Store original values for debugging
-                            original_value = perturbed_features[0, i]
-                            
                             # Shuffle only the specific feature column
+                            original_values = perturbed_features[:, i].copy()
                             np.random.shuffle(perturbed_features[:, i])
-                            shuffled_value = perturbed_features[0, i]
-                            
-                            debug_info.append(f"Feature {i}: original={original_value:.4f}, shuffled={shuffled_value:.4f}")
                             
                             # Get new prediction
                             perturbed_pred = self.ultimate_model_gwo.predict(perturbed_features, verbose=0)
@@ -377,27 +367,19 @@ class BrainStrokeDetector:
                             # Calculate importance as absolute difference
                             importance = abs(baseline_pred - perturbed_stroke_prob)
                             feature_importance.append((i, importance))
-                            successful_analyses += 1
-                            
-                            debug_info.append(f"Feature {i}: importance = {importance:.6f}")
                             
                         except Exception as feature_error:
-                            debug_info.append(f"Feature {i} failed: {str(feature_error)}")
+                            # Skip this feature if there's an error
                             continue
-                    
-                    debug_info.append(f"Successful analyses: {successful_analyses}/{num_to_analyze}")
                     
                     # Sort by importance (only if we have results)
                     if feature_importance:
                         feature_importance.sort(key=lambda x: x[1], reverse=True)
-                        debug_info.append(f"Sorted {len(feature_importance)} features by importance")
-                    else:
-                        debug_info.append("No successful feature importance calculations")
                 
                 progress_bar.progress(95)
                 
             except Exception as e:
-                debug_info.append(f"Feature importance failed completely: {str(e)}")
+                # If feature importance fails, continue without it
                 feature_importance = []
             
             progress_bar.progress(100)
@@ -425,7 +407,7 @@ class BrainStrokeDetector:
                 emoji = "✅"
                 risk_class = "risk-low"
             
-            # Result dictionary
+            # Result dictionary - FIXED: Ensure selected_features is properly handled
             result = {
                 'class': 'STROKE' if final_class == 1 else 'NORMAL',
                 'confidence': confidence,
@@ -435,9 +417,8 @@ class BrainStrokeDetector:
                 'emoji': emoji,
                 'risk_class': risk_class,
                 'feature_importance': feature_importance,
-                'selected_features': selected_features,
-                'num_features_analyzed': len(feature_importance),
-                'debug_info': debug_info
+                'selected_features': selected_features if hasattr(selected_features, 'shape') else np.array([]),
+                'num_features_analyzed': len(feature_importance)
             }
             
             return result
@@ -447,35 +428,45 @@ class BrainStrokeDetector:
             return None
 
 def display_feature_analysis(result):
-    """Display feature importance analysis"""
-    if not result.get('feature_importance'):
+    """Display feature importance analysis - FIXED VERSION"""
+    # Check if feature importance data exists and is not empty
+    feature_importance = result.get('feature_importance')
+    
+    if not feature_importance:
         st.info("🔍 Feature importance analysis is not available for this prediction")
         
-        # Show detailed debug information
-        with st.expander("🔧 Debug Information"):
-            st.write("**Why feature importance failed:**")
-            debug_info = result.get('debug_info', [])
-            if debug_info:
-                for info in debug_info:
-                    st.write(f"- {info}")
+        # Show debug information
+        with st.expander("🔧 Technical Details"):
+            st.write("**Why feature importance is not available:**")
+            
+            # Check selected_features safely
+            selected_features = result.get('selected_features', np.array([]))
+            if hasattr(selected_features, 'shape'):
+                st.write(f"- Selected features shape: {selected_features.shape}")
+                st.write(f"- Number of GWO features: {selected_features.shape[1] if len(selected_features.shape) > 1 else 0}")
             else:
-                st.write("No debug information available")
+                st.write(f"- Selected features type: {type(selected_features)}")
                 
-            st.write("**Feature Details:**")
-            st.write(f"- Selected features shape: {result.get('selected_features', np.array([])).shape}")
-            st.write(f"- Number of features analyzed: {result.get('num_features_analyzed', 0)}")
-            st.write(f"- Feature importance list: {result.get('feature_importance')}")
+            st.write(f"- Features analyzed: {result.get('num_features_analyzed', 0)}")
+            st.write(f"- Feature importance data: {feature_importance}")
+            
+            # Additional diagnostics
+            if result.get('selected_features') is None:
+                st.write("- No selected features available")
+            elif hasattr(result['selected_features'], 'shape') and result['selected_features'].shape[1] == 0:
+                st.write("- No GWO features were selected (empty feature mask)")
+            elif result.get('num_features_analyzed', 0) == 0:
+                st.write("- Feature importance calculation failed during analysis")
         
         return
         
     try:
-        feature_importance = result['feature_importance']
-        
         st.markdown("---")
         st.subheader("🔍 Feature Importance Analysis")
         
         # Display top features
-        st.write(f"**Top Contributing Features (Analyzed {len(feature_importance)} out of {result['selected_features'].shape[1]} GWO features):**")
+        num_total_features = result['selected_features'].shape[1] if hasattr(result['selected_features'], 'shape') else 0
+        st.write(f"**Top Contributing Features (Analyzed {len(feature_importance)} out of {num_total_features} GWO features):**")
         
         # Create bar chart
         top_features = feature_importance[:8]  # Top 8 features
