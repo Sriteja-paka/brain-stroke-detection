@@ -1,8 +1,0 @@
-streamlit
-tensorflow
-numpy
-matplotlib
-Pillow
-scikit-learn
-joblib
-shap
